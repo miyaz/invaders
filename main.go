@@ -2,7 +2,9 @@ package main
 
 import (
 	"bufio"
+	"fmt"
 	"math/rand"
+	"runtime"
 	"strconv"
 	"strings"
 	"sync"
@@ -31,6 +33,7 @@ type state struct {
 	Invaders  map[int]*invader
 	Bullets   map[int]*bullet
 	Life      int
+	Combo     int
 	Score     int
 	HighScore int
 }
@@ -51,6 +54,7 @@ type invader struct {
 	Pos      point
 	Vec      point
 	Interval int
+	Life     int
 }
 
 type bullet struct {
@@ -96,15 +100,6 @@ func drawLoop(sch chan state) {
 		st := <-sch
 		mu.Lock()
 		termbox.Clear(termbox.ColorDefault, termbox.ColorDefault)
-		for i := 0; i < _width; i++ {
-			drawLine(i, 0, "-")
-			drawLine(i, _height, "-")
-		}
-		for i := 0; i < _height; i++ {
-			drawLine(0, i, "|")
-			drawLine(_width, i, "|")
-		}
-		drawPlayer(st.Player)
 		if st.End == false {
 			for k, _ := range st.Invaders {
 				drawInvader(*st.Invaders[k])
@@ -113,11 +108,35 @@ func drawLoop(sch chan state) {
 				drawBullet(*st.Bullets[k])
 			}
 		} else {
-			drawLine(0, _height/2, "|                                PUSH ENTER KEY")
+			displayMessage("PUSH ENTER KEY")
 		}
+		for i := 0; i < _width+1; i++ {
+			drawLine(i, 1, "-")
+			drawLine(i, _height, "-")
+		}
+		for i := 0; i < _height; i++ {
+			drawLine(0, i, "|")
+			drawLine(_width, i, "|")
+		}
+		drawLine(1, 0, "EXIT : ESC KEY")
+		drawLine(30, 0, fmt.Sprintf("NumGoroutine: %03d", runtime.NumGoroutine()))
+		drawLine(_width-65, 0, fmt.Sprintf("HighScore: %05d", st.HighScore))
+		drawLine(_width-45, 0, fmt.Sprintf("Score: %05d", st.Score))
+		drawLine(_width-30, 0, fmt.Sprintf("Combo: %03d", st.Combo))
+		drawLine(_width-10, 0, fmt.Sprintf("Life: %02d", st.Life))
+		drawPlayer(st.Player)
 		termbox.Flush()
 		mu.Unlock()
 	}
+}
+
+func displayMessage(msg string) {
+	frameWidth := int(float64(len(msg)) * 1.5)
+	for i := 0; i < frameWidth; i++ {
+		drawLine(_width/2-frameWidth/2+i, _height/2-1, "=")
+		drawLine(_width/2-frameWidth/2+i, _height/2+1, "=")
+	}
+	drawLine(_width/2-len(msg)/2, _height/2, msg)
 }
 
 //行を描画
@@ -202,7 +221,10 @@ func controller(st state, stateCh chan state, keyCh chan termbox.Key, moveCh cha
 				}
 				break
 			case termbox.KeyEnter: //ゲームスタート
-				st.End = false
+				if st.End {
+					st.End = false
+					st.Score = 0
+				}
 				break
 			case termbox.KeySpace: //発射
 				bulletCnt++
@@ -284,11 +306,9 @@ func initPlayer() *player {
 
 func initInvaders() map[int]*invader {
 	var colors = []termbox.Attribute{
-		termbox.ColorRed,
 		termbox.ColorGreen,
 		termbox.ColorYellow,
 		termbox.ColorBlue,
-		termbox.ColorMagenta,
 		termbox.ColorCyan,
 		termbox.ColorWhite,
 	}
@@ -310,9 +330,10 @@ func initInvaders() map[int]*invader {
 			Rows:     rows,
 			Cols:     cols,
 			Color:    colors[choice(len(colors))],
-			Pos:      point{X: choice(_width-cols) + 1, Y: choice(_height-rows) + 1},
+			Pos:      point{X: choice(_width-cols) + 1, Y: choice(_height*2/3) + 2},
 			Vec:      point{X: plusminus[choice(2)], Y: plusminus[choice(2)]},
 			Interval: ((i % 5) + 1) * 50,
+			Life:     3,
 		}
 	}
 	return invaders
@@ -349,8 +370,8 @@ func checkCollision(st state, i int) state {
 		st.Invaders[i].Vec.X = -1
 	}
 	//上の壁
-	if st.Invaders[i].Pos.Y <= 0 {
-		st.Invaders[i].Pos.Y = 1
+	if st.Invaders[i].Pos.Y <= 1 {
+		st.Invaders[i].Pos.Y = 2
 		st.Invaders[i].Vec.Y = 1
 	}
 	//下の壁
@@ -421,6 +442,9 @@ func checkCollision(st state, i int) state {
 			st.Invaders[i].Vec.X = +1
 		}
 		st.Life--
+		if st.Life <= 0 {
+			st = resetGame(st)
+		}
 	}
 
 	return st
@@ -434,21 +458,50 @@ func checkHit(st state, i int) state {
 			bullet.Pos.Y+bullet.Rows >= invader.Pos.Y && bullet.Pos.Y <= invader.Pos.Y+invader.Rows {
 			close(st.Bullets[i].CloseCh)
 			delete(st.Bullets, i)
-			delete(st.Invaders, o)
+			st.Invaders[o].Life--
+			st.Combo++
+			switch st.Invaders[o].Life {
+			case 2:
+				st.Invaders[o].Color = termbox.ColorMagenta
+			case 1:
+				st.Invaders[o].Color = termbox.ColorRed
+			case 0:
+				delete(st.Invaders, o)
+				st.Score += st.Combo
+				if st.HighScore < st.Score {
+					st.HighScore = st.Score
+				}
+			}
 			//インベーダー全撃破
 			if len(st.Invaders) == 0 {
-				st.Invaders = initInvaders()
+				st = resetGame(st)
 			}
 			return st
 		}
 	}
 
 	//外れたので消す
-	if st.Bullets[i].Pos.Y < 1 {
+	if st.Bullets[i].Pos.Y <= 1 {
+		st.Combo = 0
 		close(st.Bullets[i].CloseCh)
 		delete(st.Bullets, i)
 	}
 
+	return st
+}
+
+func resetGame(st state) state {
+	hs := st.HighScore
+	s := st.Score
+	if st.HighScore < st.Score {
+		hs = st.Score
+	}
+	for k, _ := range st.Bullets {
+		close(st.Bullets[k].CloseCh)
+	}
+	st = initGame()
+	st.HighScore = hs
+	st.Score = s
 	return st
 }
 
