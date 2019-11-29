@@ -2,7 +2,7 @@ package main
 
 import (
 	"bufio"
-	"fmt"
+	"math/rand"
 	"strings"
 	"sync"
 	"time"
@@ -11,13 +11,10 @@ import (
 )
 
 const (
-	_refreshSpan     = 1000
-	_fireTimeSpan    = 100
-	_invaderTimeSpan = 500
-	_barWidth        = 10
-	_blockWidth      = 6
-	_height          = 25
-	_width           = 80
+	_barWidth   = 10
+	_blockWidth = 6
+	_height     = 40
+	_width      = 120
 )
 
 type point struct {
@@ -31,6 +28,7 @@ var mu sync.Mutex
 type state struct {
 	BarX      int
 	End       bool
+	Invaders  []invader
 	Ball      point
 	Vec       point
 	Blocks    []point
@@ -39,20 +37,27 @@ type state struct {
 	HighScore int
 }
 
-//タイマーイベント
-func fireTimerLoop(ftch chan bool) {
-	for {
-		ftch <- true
-		time.Sleep(time.Duration(_fireTimeSpan) * time.Millisecond)
-	}
+type invader struct {
+	Forms    []string
+	Rows     int
+	Cols     int
+	Color    termbox.Attribute
+	Pos      point
+	Vec      point
+	Interval int
 }
 
 //タイマーイベント
-func invaderTimerLoop(itch chan bool) {
+func moveLoop(moveCh chan int, mover, ticker int) {
+	t := time.NewTicker(time.Duration(ticker) * time.Millisecond)
 	for {
-		itch <- true
-		time.Sleep(time.Duration(_invaderTimeSpan) * time.Millisecond)
+		select {
+		case <-t.C: //タイマーイベント
+			moveCh <- mover
+			break
+		}
 	}
+	t.Stop()
 }
 
 //キーイベント
@@ -72,21 +77,29 @@ func drawLoop(sch chan state) {
 		st := <-sch
 		mu.Lock()
 		termbox.Clear(termbox.ColorDefault, termbox.ColorDefault)
-		drawLine(1, 0, "EXIT : ESC KEY")
-		drawLine(_width-50, 0, fmt.Sprintf("HighScore : %05d", st.HighScore))
-		drawLine(_width-30, 0, fmt.Sprintf("Score : %05d", st.Score))
-		drawLine(_width-10, 0, fmt.Sprintf("Life : %02d", st.Life))
-		drawLine(0, 1, "--------------------------------------------------------------------------------")
-		for i := range st.Blocks {
-			if st.Blocks[i].Y >= 0 {
-				drawLine(st.Blocks[i].X, st.Blocks[i].Y, "======")
-			}
+		for i := 0; i < _width; i++ {
+			drawLine(i, 0, "-")
+			drawLine(i, _height, "-")
 		}
+		for i := 0; i < _height; i++ {
+			drawLine(0, i, "|")
+			drawLine(_width, i, "|")
+		}
+		/*
+			for i := range st.Blocks {
+				if st.Blocks[i].Y >= 0 {
+					drawLine(st.Blocks[i].X, st.Blocks[i].Y, "======")
+				}
+			}
+		*/
 		drawLine(st.BarX, _height-2, "-========-")
 		if st.End == false {
-			drawInvader(st.Ball.X, st.Ball.Y)
+			//drawInvader(st.Ball.X, st.Ball.Y)
+			for i := range st.Invaders {
+				drawInvader(st.Invaders[i])
+			}
 		} else {
-			drawLine(0, _height/2, "                                  PUSH SPACE KEY")
+			drawLine(0, _height/2, "|                                PUSH SPACE KEY")
 		}
 		termbox.Flush()
 		mu.Unlock()
@@ -102,28 +115,29 @@ func drawLine(x, y int, str string) {
 }
 
 //インベーダーを描画
-func drawInvader(x, y int) {
-	invader := `
- ▚▄▄▞
-▟█▟▙█▙
-▘▝▖▗▘▝
-`
-	scanner := bufio.NewScanner(strings.NewReader(invader))
+func drawInvader(invader invader) {
+	forms := invader.Forms
+	form := forms[choice(2)]
+	scanner := bufio.NewScanner(strings.NewReader(form))
 	j := 0
 	for scanner.Scan() {
 		line := scanner.Text()
 		runes := []rune(line)
 		for i := 0; i < len(runes); i++ {
-			termbox.SetCell(x+i-3, y+j-2, runes[i], termbox.ColorDefault, termbox.ColorDefault)
+			termbox.SetCell(invader.Pos.X+i, invader.Pos.Y+j, runes[i], invader.Color, termbox.ColorDefault)
 		}
 		j++
 	}
 }
 
+func choice(len int) int {
+	rand.Seed(time.Now().UnixNano())
+	i := rand.Intn(len)
+	return i
+}
+
 //ゲームメイン処理
-func controller(stateCh chan state, keyCh chan termbox.Key, fireCh, invaderCh chan bool) {
-	st := initGame()
-	t := time.NewTicker(time.Duration(_refreshSpan) * time.Millisecond)
+func controller(st state, stateCh chan state, keyCh chan termbox.Key, moveCh chan int) {
 	for {
 		select {
 		case key := <-keyCh: //キーイベント
@@ -150,23 +164,20 @@ func controller(stateCh chan state, keyCh chan termbox.Key, fireCh, invaderCh ch
 			mu.Unlock()
 			stateCh <- st
 			break
-		case <-fireCh: //タイマーイベント
+		case i := <-moveCh: //タイマーイベント
 			mu.Lock()
 			if st.End == false {
 				st.Ball.X += st.Vec.X
 				st.Ball.Y += st.Vec.Y
+				st.Invaders[i].Pos.X += st.Invaders[i].Vec.X
+				st.Invaders[i].Pos.Y += st.Invaders[i].Vec.Y
 				st = checkCollision(st)
 			}
 			mu.Unlock()
 			stateCh <- st
 			break
-		case <-t.C: //タイマーイベント
-			break
-			//default:
-			//	break
 		}
 	}
-	t.Stop()
 }
 
 //初期化
@@ -176,7 +187,9 @@ func initGame() state {
 	st.Ball.X, st.Ball.Y = _width/2, _height*2/3
 	st.Vec.X, st.Vec.Y = 1, -1
 	st.Life = 3
-	st.Blocks = initBlock()
+	//st.Blocks = initBlock()
+	st.Invaders = initInvaders()
+
 	return st
 }
 
@@ -189,33 +202,76 @@ func initBlock() []point {
 				point{X: 2 + c*(_blockWidth+1), Y: 4 + r})
 		}
 	}
+
 	return blocks
+}
+
+func initInvaders() []invader {
+	var colors = []termbox.Attribute{
+		termbox.ColorRed,
+		termbox.ColorGreen,
+		termbox.ColorYellow,
+		termbox.ColorBlue,
+		termbox.ColorMagenta,
+		termbox.ColorCyan,
+		termbox.ColorWhite,
+	}
+	form1 := strings.TrimLeft(`
+ ▚▄▄▞ 
+▙█▟▙█▟
+ ▞  ▚ `, "\n")
+	form2 := strings.TrimLeft(`
+ ▚▄▄▞ 
+▟█▟▙█▙
+▘▝▖▗▘▝`, "\n")
+	plusminus := []int{-1, 1}
+	invaders := []invader{}
+	rows := strings.Count(form1, "\n") + 1
+	cols := 6
+	for i := 0; i < 20; i++ {
+		invader := invader{
+			Forms:    []string{form1, form2},
+			Rows:     rows,
+			Cols:     cols,
+			Color:    colors[choice(len(colors))],
+			Pos:      point{X: choice(_width - 10), Y: choice(_height - 5)},
+			Vec:      point{X: plusminus[choice(2)], Y: plusminus[choice(2)]},
+			Interval: ((i % 5) + 1) * 50,
+		}
+		invaders = append(invaders, invader)
+	}
+	return invaders
 }
 
 //衝突判定
 func checkCollision(st state) state {
 	//左右の壁
-	if st.Ball.X <= 0 || st.Ball.X+3 >= _width {
+	if st.Ball.X-4 <= 0 || st.Ball.X+3 >= _width {
 		st.Vec.X *= -1
 	}
 	//上下の壁
 	if st.Ball.Y <= 2 {
 		st.Vec.Y = 1
 	}
-	//ミス
 	if st.Ball.Y >= _height {
-		st.Life--
-		st.Ball.X, st.Ball.Y = _width/2, _height*2/3
 		st.Vec.Y = -1
-		if st.Life <= 0 {
-			hs := 0
-			if st.HighScore < st.Score {
-				hs = st.Score
-			}
-			st = initGame()
-			st.HighScore = hs
-		}
 	}
+	/*
+		//ミス
+		if st.Ball.Y >= _height {
+			st.Life--
+			st.Ball.X, st.Ball.Y = _width/2, _height*2/3
+			st.Vec.Y = -1
+			if st.Life <= 0 {
+				hs := 0
+				if st.HighScore < st.Score {
+					hs = st.Score
+				}
+				st = initGame()
+				st.HighScore = hs
+			}
+		}
+	*/
 	//バーとの衝突判定
 	if st.Ball.X >= st.BarX && st.Ball.X <= st.BarX+_barWidth &&
 		(st.Ball.Y == _height-2) {
@@ -243,7 +299,43 @@ func checkCollision(st state) state {
 	}
 	//ブロック全撃破
 	if len(st.Blocks) == 0 {
-		st.Blocks = initBlock()
+		//st.Blocks = initBlock()
+	}
+
+	for i := range st.Invaders {
+		//左の壁
+		if st.Invaders[i].Pos.X <= 0 {
+			st.Invaders[i].Pos.X = 1
+			st.Invaders[i].Vec.X = 1
+		}
+		//右の壁
+		if st.Invaders[i].Pos.X+st.Invaders[i].Cols >= _width {
+			st.Invaders[i].Pos.X = _width - st.Invaders[i].Cols
+			st.Invaders[i].Vec.X = -1
+		}
+		//上下の壁
+		if st.Invaders[i].Pos.Y <= 0 {
+			st.Invaders[i].Pos.Y = 1
+			st.Invaders[i].Vec.Y = 1
+		}
+		if st.Invaders[i].Pos.Y+st.Invaders[i].Rows >= _height {
+			st.Invaders[i].Pos.Y = _height - st.Invaders[i].Rows
+			st.Invaders[i].Vec.Y = -1
+		}
+		//バーとの衝突判定
+		if st.Invaders[i].Pos.X+st.Invaders[i].Cols >= st.BarX && st.Invaders[i].Pos.X <= st.BarX+_barWidth &&
+			st.Invaders[i].Pos.Y == _height-2-st.Invaders[i].Rows {
+			st.Invaders[i].Vec.Y = -1
+			if st.Invaders[i].Pos.X+(st.Invaders[i].Cols/2) <= st.BarX+(_barWidth/2) {
+				st.Invaders[i].Vec.X = -1
+			} else {
+				st.Invaders[i].Vec.X = +1
+			}
+		}
+		//バーが右の壁に到達
+		if st.BarX+_barWidth > _width {
+			st.BarX -= 3
+		}
 	}
 
 	return st
@@ -261,17 +353,20 @@ func main() {
 	if err != nil {
 		panic(err)
 	}
+	st := initGame()
 	stateCh := make(chan state)
 	keyCh := make(chan termbox.Key)
-	fireCh := make(chan bool)
-	invaderCh := make(chan bool)
+	moveCh := make(chan int)
 
 	go drawLoop(stateCh)
 	go keyEventLoop(keyCh)
-	go fireTimerLoop(fireCh)
-	go invaderTimerLoop(invaderCh)
+	for k, v := range st.Invaders {
+		go func(idx, ticker int) {
+			moveLoop(moveCh, idx, ticker)
+		}(k, v.Interval)
+	}
 
-	controller(stateCh, keyCh, fireCh, invaderCh)
+	controller(st, stateCh, keyCh, moveCh)
 	termbox.Clear(termbox.ColorDefault, termbox.ColorDefault)
 
 	defer termbox.Close()
