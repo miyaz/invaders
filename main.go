@@ -27,7 +27,7 @@ var mu sync.Mutex
 type state struct {
 	BarX      int
 	End       bool
-	Invaders  []invader
+	Invaders  map[int]*invader
 	Life      int
 	Score     int
 	HighScore int
@@ -83,8 +83,8 @@ func drawLoop(sch chan state) {
 		}
 		drawLine(st.BarX, _height-2, "-========-")
 		if st.End == false {
-			for i := range st.Invaders {
-				drawInvader(st.Invaders[i])
+			for k, _ := range st.Invaders {
+				drawInvader(*st.Invaders[k])
 			}
 		} else {
 			drawLine(0, _height/2, "|                                PUSH SPACE KEY")
@@ -156,9 +156,11 @@ func controller(st state, stateCh chan state, keyCh chan termbox.Key, moveCh cha
 		case i := <-moveCh: //タイマーイベント
 			mu.Lock()
 			if st.End == false {
-				st.Invaders[i].Pos.X += st.Invaders[i].Vec.X
-				st.Invaders[i].Pos.Y += st.Invaders[i].Vec.Y
-				st = checkCollision(st, i)
+				if _, ok := st.Invaders[i]; ok {
+					st.Invaders[i].Pos.X += st.Invaders[i].Vec.X
+					st.Invaders[i].Pos.Y += st.Invaders[i].Vec.Y
+					st = checkCollision(st, i)
+				}
 			}
 			mu.Unlock()
 			stateCh <- st
@@ -177,7 +179,7 @@ func initGame() state {
 	return st
 }
 
-func initInvaders() []invader {
+func initInvaders() map[int]*invader {
 	var colors = []termbox.Attribute{
 		termbox.ColorRed,
 		termbox.ColorGreen,
@@ -196,11 +198,11 @@ func initInvaders() []invader {
 ▟█▟▙█▙
 ▘▝▖▗▘▝`, "\n")
 	plusminus := []int{-1, 1}
-	invaders := []invader{}
+	invaders := map[int]*invader{}
 	rows := strings.Count(form1, "\n") + 1
 	cols := 6
 	for i := 0; i < 20; i++ {
-		invader := invader{
+		invaders[i] = &invader{
 			Forms:    []string{form1, form2},
 			Rows:     rows,
 			Cols:     cols,
@@ -209,7 +211,6 @@ func initInvaders() []invader {
 			Vec:      point{X: plusminus[choice(2)], Y: plusminus[choice(2)]},
 			Interval: ((i % 5) + 1) * 50,
 		}
-		invaders = append(invaders, invader)
 	}
 	return invaders
 }
@@ -242,7 +243,7 @@ func checkCollision(st state, i int) state {
 		st.Invaders[i].Vec.Y = -1
 	}
 	//インベーダー同士
-	for o := range st.Invaders {
+	for o, _ := range st.Invaders {
 		//左
 		if st.Invaders[i].Vec.X < 0 && st.Invaders[i].Pos.X == st.Invaders[o].Pos.X+st.Invaders[o].Cols {
 			if st.Invaders[i].Pos.Y <= st.Invaders[o].Pos.Y+st.Invaders[o].Rows &&
@@ -296,12 +297,7 @@ func checkCollision(st state, i int) state {
 	//バーとの衝突判定
 	if st.Invaders[i].Pos.X+st.Invaders[i].Cols >= st.BarX && st.Invaders[i].Pos.X <= st.BarX+_barWidth &&
 		st.Invaders[i].Pos.Y == _height-2-st.Invaders[i].Rows {
-		st.Invaders[i].Vec.Y = -1
-		if st.Invaders[i].Pos.X+(st.Invaders[i].Cols/2) <= st.BarX+(_barWidth/2) {
-			st.Invaders[i].Vec.X = -1
-		} else {
-			st.Invaders[i].Vec.X = +1
-		}
+		delete(st.Invaders, i)
 	}
 
 	//インベーダー全撃破
