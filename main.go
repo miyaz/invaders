@@ -1,7 +1,9 @@
 package main
 
 import (
+	"bufio"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
@@ -9,11 +11,13 @@ import (
 )
 
 const (
-	_timeSpan   = 100
-	_barWidth   = 10
-	_blockWidth = 6
-	_height     = 25
-	_width      = 80
+	_refreshSpan     = 1000
+	_fireTimeSpan    = 100
+	_invaderTimeSpan = 500
+	_barWidth        = 10
+	_blockWidth      = 6
+	_height          = 25
+	_width           = 80
 )
 
 type point struct {
@@ -36,10 +40,18 @@ type state struct {
 }
 
 //タイマーイベント
-func timerLoop(tch chan bool) {
+func fireTimerLoop(ftch chan bool) {
 	for {
-		tch <- true
-		time.Sleep(time.Duration(_timeSpan) * time.Millisecond)
+		ftch <- true
+		time.Sleep(time.Duration(_fireTimeSpan) * time.Millisecond)
+	}
+}
+
+//タイマーイベント
+func invaderTimerLoop(itch chan bool) {
+	for {
+		itch <- true
+		time.Sleep(time.Duration(_invaderTimeSpan) * time.Millisecond)
 	}
 }
 
@@ -72,7 +84,7 @@ func drawLoop(sch chan state) {
 		}
 		drawLine(st.BarX, _height-2, "-========-")
 		if st.End == false {
-			drawLine(st.Ball.X, st.Ball.Y, "*")
+			drawInvader(st.Ball.X, st.Ball.Y)
 		} else {
 			drawLine(0, _height/2, "                                  PUSH SPACE KEY")
 		}
@@ -89,9 +101,29 @@ func drawLine(x, y int, str string) {
 	}
 }
 
+//インベーダーを描画
+func drawInvader(x, y int) {
+	invader := `
+ ▚▄▄▞
+▟█▟▙█▙
+▘▝▖▗▘▝
+`
+	scanner := bufio.NewScanner(strings.NewReader(invader))
+	j := 0
+	for scanner.Scan() {
+		line := scanner.Text()
+		runes := []rune(line)
+		for i := 0; i < len(runes); i++ {
+			termbox.SetCell(x+i-3, y+j-2, runes[i], termbox.ColorDefault, termbox.ColorDefault)
+		}
+		j++
+	}
+}
+
 //ゲームメイン処理
-func controller(stateCh chan state, keyCh chan termbox.Key, timerCh chan bool) {
+func controller(stateCh chan state, keyCh chan termbox.Key, fireCh, invaderCh chan bool) {
 	st := initGame()
+	t := time.NewTicker(time.Duration(_refreshSpan) * time.Millisecond)
 	for {
 		select {
 		case key := <-keyCh: //キーイベント
@@ -102,10 +134,14 @@ func controller(stateCh chan state, keyCh chan termbox.Key, timerCh chan bool) {
 				mu.Unlock()
 				return
 			case termbox.KeyArrowLeft: //ひだり
-				st.BarX += -3
+				if st.BarX-3 > 0 {
+					st.BarX -= 3
+				}
 				break
 			case termbox.KeyArrowRight: //みぎ
-				st.BarX += +3
+				if st.BarX+_barWidth+3 < _width {
+					st.BarX += 3
+				}
 				break
 			case termbox.KeySpace, termbox.KeyEnter: //ゲームスタート
 				st.End = false
@@ -114,7 +150,7 @@ func controller(stateCh chan state, keyCh chan termbox.Key, timerCh chan bool) {
 			mu.Unlock()
 			stateCh <- st
 			break
-		case <-timerCh: //タイマーイベント
+		case <-fireCh: //タイマーイベント
 			mu.Lock()
 			if st.End == false {
 				st.Ball.X += st.Vec.X
@@ -124,10 +160,13 @@ func controller(stateCh chan state, keyCh chan termbox.Key, timerCh chan bool) {
 			mu.Unlock()
 			stateCh <- st
 			break
-		default:
+		case <-t.C: //タイマーイベント
 			break
+			//default:
+			//	break
 		}
 	}
+	t.Stop()
 }
 
 //初期化
@@ -156,7 +195,7 @@ func initBlock() []point {
 //衝突判定
 func checkCollision(st state) state {
 	//左右の壁
-	if st.Ball.X <= 0 || st.Ball.X >= _width {
+	if st.Ball.X <= 0 || st.Ball.X+3 >= _width {
 		st.Vec.X *= -1
 	}
 	//上下の壁
@@ -186,6 +225,10 @@ func checkCollision(st state) state {
 		} else {
 			st.Vec.X = +1
 		}
+	}
+	//バーが右の壁に到達
+	if st.BarX+_barWidth > _width {
+		st.BarX -= 3
 	}
 	//ブロックとの衝突判定
 	for i := range st.Blocks {
@@ -220,13 +263,15 @@ func main() {
 	}
 	stateCh := make(chan state)
 	keyCh := make(chan termbox.Key)
-	timerCh := make(chan bool)
+	fireCh := make(chan bool)
+	invaderCh := make(chan bool)
 
 	go drawLoop(stateCh)
 	go keyEventLoop(keyCh)
-	go timerLoop(timerCh)
+	go fireTimerLoop(fireCh)
+	go invaderTimerLoop(invaderCh)
 
-	controller(stateCh, keyCh, timerCh)
+	controller(stateCh, keyCh, fireCh, invaderCh)
 	termbox.Clear(termbox.ColorDefault, termbox.ColorDefault)
 
 	defer termbox.Close()
