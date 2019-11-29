@@ -61,19 +61,22 @@ type bullet struct {
 	Pos      point
 	Vec      point
 	Interval int
+	CloseCh  chan bool
 }
 
 //タイマーイベント
-func moveLoop(moveCh chan int, mover, ticker int) {
+func moveLoop(moveCh chan int, closeCh chan bool, mover, ticker int) {
 	t := time.NewTicker(time.Duration(ticker) * time.Millisecond)
 	for {
 		select {
 		case <-t.C: //タイマーイベント
 			moveCh <- mover
 			break
+		case <-closeCh:
+			t.Stop()
+			return
 		}
 	}
-	t.Stop()
 }
 
 //キーイベント
@@ -204,9 +207,9 @@ func controller(st state, stateCh chan state, keyCh chan termbox.Key, moveCh cha
 			case termbox.KeySpace: //発射
 				bulletCnt++
 				st.Bullets[bulletCnt] = fire(st.Player.Pos.X + st.Player.Cols/2)
-				go func(key, ticker int) {
-					moveLoop(bulletCh, key, ticker)
-				}(bulletCnt, st.Bullets[bulletCnt].Interval)
+				go func(closeCh chan bool, key, ticker int) {
+					moveLoop(bulletCh, closeCh, key, ticker)
+				}(st.Bullets[bulletCnt].CloseCh, bulletCnt, st.Bullets[bulletCnt].Interval)
 				break
 			}
 			mu.Unlock()
@@ -324,6 +327,7 @@ func fire(x int) *bullet {
 		Pos:      point{X: x, Y: _height - 3},
 		Vec:      point{X: 0, Y: -1},
 		Interval: 50,
+		CloseCh:  make(chan bool),
 	}
 }
 
@@ -428,6 +432,7 @@ func checkHit(st state, i int) state {
 	for o, invader := range st.Invaders {
 		if bullet.Pos.X+bullet.Cols >= invader.Pos.X && bullet.Pos.X <= invader.Pos.X+invader.Cols &&
 			bullet.Pos.Y+bullet.Rows >= invader.Pos.Y && bullet.Pos.Y <= invader.Pos.Y+invader.Rows {
+			close(st.Bullets[i].CloseCh)
 			delete(st.Bullets, i)
 			delete(st.Invaders, o)
 			//インベーダー全撃破
@@ -440,6 +445,7 @@ func checkHit(st state, i int) state {
 
 	//外れたので消す
 	if st.Bullets[i].Pos.Y < 1 {
+		close(st.Bullets[i].CloseCh)
 		delete(st.Bullets, i)
 	}
 
@@ -461,7 +467,7 @@ func main() {
 	go keyEventLoop(keyCh)
 	for k, v := range st.Invaders {
 		go func(idx, ticker int) {
-			moveLoop(moveCh, idx, ticker)
+			moveLoop(moveCh, nil, idx, ticker)
 		}(k, v.Interval)
 	}
 
