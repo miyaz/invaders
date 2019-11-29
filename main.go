@@ -241,6 +241,58 @@ func checkCollision(st state, i int) state {
 		st.Invaders[i].Pos.Y = _height - st.Invaders[i].Rows
 		st.Invaders[i].Vec.Y = -1
 	}
+	//インベーダー同士
+	for o := range st.Invaders {
+		//左
+		if st.Invaders[i].Vec.X < 0 && st.Invaders[i].Pos.X == st.Invaders[o].Pos.X+st.Invaders[o].Cols {
+			if st.Invaders[i].Pos.Y <= st.Invaders[o].Pos.Y+st.Invaders[o].Rows &&
+				st.Invaders[i].Pos.Y+st.Invaders[i].Rows >= st.Invaders[o].Pos.Y {
+				if st.Invaders[i].Vec.X != st.Invaders[o].Vec.X {
+					st.Invaders[i].Vec.X *= -1
+					st.Invaders[o].Vec.X *= -1
+				} else {
+					st.Invaders[i].Vec.X *= -1
+				}
+			}
+		}
+		//右
+		if st.Invaders[i].Vec.X > 0 && st.Invaders[i].Pos.X+st.Invaders[i].Cols == st.Invaders[o].Pos.X {
+			if st.Invaders[i].Pos.Y <= st.Invaders[o].Pos.Y+st.Invaders[o].Rows &&
+				st.Invaders[i].Pos.Y+st.Invaders[i].Rows >= st.Invaders[o].Pos.Y {
+				if st.Invaders[i].Vec.X != st.Invaders[o].Vec.X {
+					st.Invaders[i].Vec.X *= -1
+					st.Invaders[o].Vec.X *= -1
+				} else {
+					st.Invaders[i].Vec.X *= -1
+				}
+			}
+		}
+		//上
+		if st.Invaders[i].Vec.Y < 0 && st.Invaders[i].Pos.Y == st.Invaders[o].Pos.Y+st.Invaders[o].Rows {
+			if st.Invaders[i].Pos.X <= st.Invaders[o].Pos.X+st.Invaders[o].Cols &&
+				st.Invaders[i].Pos.X+st.Invaders[i].Cols >= st.Invaders[o].Pos.X {
+				if st.Invaders[i].Vec.Y != st.Invaders[o].Vec.Y {
+					st.Invaders[i].Vec.Y *= -1
+					st.Invaders[o].Vec.Y *= -1
+				} else {
+					st.Invaders[i].Vec.Y *= -1
+				}
+			}
+		}
+		//下
+		if st.Invaders[i].Vec.Y > 0 && st.Invaders[i].Pos.Y+st.Invaders[i].Rows == st.Invaders[o].Pos.Y {
+			if st.Invaders[i].Pos.X <= st.Invaders[o].Pos.X+st.Invaders[o].Cols &&
+				st.Invaders[i].Pos.X+st.Invaders[i].Cols >= st.Invaders[o].Pos.X {
+				if st.Invaders[i].Vec.Y != st.Invaders[o].Vec.Y {
+					st.Invaders[i].Vec.Y *= -1
+					st.Invaders[o].Vec.Y *= -1
+				} else {
+					st.Invaders[i].Vec.Y *= -1
+				}
+			}
+		}
+	}
+
 	//バーとの衝突判定
 	if st.Invaders[i].Pos.X+st.Invaders[i].Cols >= st.BarX && st.Invaders[i].Pos.X <= st.BarX+_barWidth &&
 		st.Invaders[i].Pos.Y == _height-2-st.Invaders[i].Rows {
