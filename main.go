@@ -11,10 +11,9 @@ import (
 )
 
 const (
-	_barWidth   = 10
-	_blockWidth = 6
-	_height     = 40
-	_width      = 120
+	_barWidth = 10
+	_height   = 40
+	_width    = 120
 )
 
 type point struct {
@@ -29,9 +28,6 @@ type state struct {
 	BarX      int
 	End       bool
 	Invaders  []invader
-	Ball      point
-	Vec       point
-	Blocks    []point
 	Life      int
 	Score     int
 	HighScore int
@@ -85,16 +81,8 @@ func drawLoop(sch chan state) {
 			drawLine(0, i, "|")
 			drawLine(_width, i, "|")
 		}
-		/*
-			for i := range st.Blocks {
-				if st.Blocks[i].Y >= 0 {
-					drawLine(st.Blocks[i].X, st.Blocks[i].Y, "======")
-				}
-			}
-		*/
 		drawLine(st.BarX, _height-2, "-========-")
 		if st.End == false {
-			//drawInvader(st.Ball.X, st.Ball.Y)
 			for i := range st.Invaders {
 				drawInvader(st.Invaders[i])
 			}
@@ -116,8 +104,9 @@ func drawLine(x, y int, str string) {
 
 //インベーダーを描画
 func drawInvader(invader invader) {
+	formIdx := invader.Pos.X / 10 % 2
 	forms := invader.Forms
-	form := forms[choice(2)]
+	form := forms[formIdx]
 	scanner := bufio.NewScanner(strings.NewReader(form))
 	j := 0
 	for scanner.Scan() {
@@ -167,11 +156,9 @@ func controller(st state, stateCh chan state, keyCh chan termbox.Key, moveCh cha
 		case i := <-moveCh: //タイマーイベント
 			mu.Lock()
 			if st.End == false {
-				st.Ball.X += st.Vec.X
-				st.Ball.Y += st.Vec.Y
 				st.Invaders[i].Pos.X += st.Invaders[i].Vec.X
 				st.Invaders[i].Pos.Y += st.Invaders[i].Vec.Y
-				st = checkCollision(st)
+				st = checkCollision(st, i)
 			}
 			mu.Unlock()
 			stateCh <- st
@@ -184,26 +171,10 @@ func controller(st state, stateCh chan state, keyCh chan termbox.Key, moveCh cha
 func initGame() state {
 	st := state{End: true}
 	st.BarX = _width/2 - _barWidth/2
-	st.Ball.X, st.Ball.Y = _width/2, _height*2/3
-	st.Vec.X, st.Vec.Y = 1, -1
 	st.Life = 3
-	//st.Blocks = initBlock()
 	st.Invaders = initInvaders()
 
 	return st
-}
-
-//ブロック初期化
-func initBlock() []point {
-	var blocks []point
-	for r := 0; r < 5; r++ {
-		for c := 0; c < 11; c++ {
-			blocks = append(blocks,
-				point{X: 2 + c*(_blockWidth+1), Y: 4 + r})
-		}
-	}
-
-	return blocks
 }
 
 func initInvaders() []invader {
@@ -234,7 +205,7 @@ func initInvaders() []invader {
 			Rows:     rows,
 			Cols:     cols,
 			Color:    colors[choice(len(colors))],
-			Pos:      point{X: choice(_width - 10), Y: choice(_height - 5)},
+			Pos:      point{X: choice(_width-cols) + 1, Y: choice(_height-rows) + 1},
 			Vec:      point{X: plusminus[choice(2)], Y: plusminus[choice(2)]},
 			Interval: ((i % 5) + 1) * 50,
 		}
@@ -244,107 +215,49 @@ func initInvaders() []invader {
 }
 
 //衝突判定
-func checkCollision(st state) state {
-	//左右の壁
-	if st.Ball.X-4 <= 0 || st.Ball.X+3 >= _width {
-		st.Vec.X *= -1
-	}
-	//上下の壁
-	if st.Ball.Y <= 2 {
-		st.Vec.Y = 1
-	}
-	if st.Ball.Y >= _height {
-		st.Vec.Y = -1
-	}
-	/*
-		//ミス
-		if st.Ball.Y >= _height {
-			st.Life--
-			st.Ball.X, st.Ball.Y = _width/2, _height*2/3
-			st.Vec.Y = -1
-			if st.Life <= 0 {
-				hs := 0
-				if st.HighScore < st.Score {
-					hs = st.Score
-				}
-				st = initGame()
-				st.HighScore = hs
-			}
-		}
-	*/
-	//バーとの衝突判定
-	if st.Ball.X >= st.BarX && st.Ball.X <= st.BarX+_barWidth &&
-		(st.Ball.Y == _height-2) {
-		st.Vec.Y = -1
-		if st.Ball.X <= st.BarX+(_barWidth/2) {
-			st.Vec.X = -1
-		} else {
-			st.Vec.X = +1
-		}
-	}
+func checkCollision(st state, i int) state {
 	//バーが右の壁に到達
 	if st.BarX+_barWidth > _width {
 		st.BarX -= 3
 	}
-	//ブロックとの衝突判定
-	for i := range st.Blocks {
-		if st.Blocks[i].Y == st.Ball.Y {
-			if st.Blocks[i].X <= st.Ball.X && st.Blocks[i].X+_blockWidth >= st.Ball.X {
-				st.Vec.Y *= -1
-				st.Blocks = remove(st.Blocks, i)
-				st.Score++
-				break
-			}
-		}
+
+	//左の壁
+	if st.Invaders[i].Pos.X <= 0 {
+		st.Invaders[i].Pos.X = 1
+		st.Invaders[i].Vec.X = 1
 	}
-	//ブロック全撃破
-	if len(st.Blocks) == 0 {
-		//st.Blocks = initBlock()
+	//右の壁
+	if st.Invaders[i].Pos.X+st.Invaders[i].Cols >= _width {
+		st.Invaders[i].Pos.X = _width - st.Invaders[i].Cols
+		st.Invaders[i].Vec.X = -1
+	}
+	//上の壁
+	if st.Invaders[i].Pos.Y <= 0 {
+		st.Invaders[i].Pos.Y = 1
+		st.Invaders[i].Vec.Y = 1
+	}
+	//下の壁
+	if st.Invaders[i].Pos.Y+st.Invaders[i].Rows >= _height {
+		st.Invaders[i].Pos.Y = _height - st.Invaders[i].Rows
+		st.Invaders[i].Vec.Y = -1
+	}
+	//バーとの衝突判定
+	if st.Invaders[i].Pos.X+st.Invaders[i].Cols >= st.BarX && st.Invaders[i].Pos.X <= st.BarX+_barWidth &&
+		st.Invaders[i].Pos.Y == _height-2-st.Invaders[i].Rows {
+		st.Invaders[i].Vec.Y = -1
+		if st.Invaders[i].Pos.X+(st.Invaders[i].Cols/2) <= st.BarX+(_barWidth/2) {
+			st.Invaders[i].Vec.X = -1
+		} else {
+			st.Invaders[i].Vec.X = +1
+		}
 	}
 
-	for i := range st.Invaders {
-		//左の壁
-		if st.Invaders[i].Pos.X <= 0 {
-			st.Invaders[i].Pos.X = 1
-			st.Invaders[i].Vec.X = 1
-		}
-		//右の壁
-		if st.Invaders[i].Pos.X+st.Invaders[i].Cols >= _width {
-			st.Invaders[i].Pos.X = _width - st.Invaders[i].Cols
-			st.Invaders[i].Vec.X = -1
-		}
-		//上下の壁
-		if st.Invaders[i].Pos.Y <= 0 {
-			st.Invaders[i].Pos.Y = 1
-			st.Invaders[i].Vec.Y = 1
-		}
-		if st.Invaders[i].Pos.Y+st.Invaders[i].Rows >= _height {
-			st.Invaders[i].Pos.Y = _height - st.Invaders[i].Rows
-			st.Invaders[i].Vec.Y = -1
-		}
-		//バーとの衝突判定
-		if st.Invaders[i].Pos.X+st.Invaders[i].Cols >= st.BarX && st.Invaders[i].Pos.X <= st.BarX+_barWidth &&
-			st.Invaders[i].Pos.Y == _height-2-st.Invaders[i].Rows {
-			st.Invaders[i].Vec.Y = -1
-			if st.Invaders[i].Pos.X+(st.Invaders[i].Cols/2) <= st.BarX+(_barWidth/2) {
-				st.Invaders[i].Vec.X = -1
-			} else {
-				st.Invaders[i].Vec.X = +1
-			}
-		}
-		//バーが右の壁に到達
-		if st.BarX+_barWidth > _width {
-			st.BarX -= 3
-		}
+	//インベーダー全撃破
+	if len(st.Invaders) == 0 {
+		st.Invaders = initInvaders()
 	}
 
 	return st
-}
-
-//配列消去
-func remove(s []point, i int) []point {
-	s = s[:i+copy(s[i:], s[i+1:])]
-	return s
 }
 
 //main
