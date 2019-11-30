@@ -71,13 +71,13 @@ type bullet struct {
 //タイマーイベント
 func moveLoop(moveCh chan int, closeCh chan bool, mover, ticker int) {
 	t := time.NewTicker(time.Duration(ticker) * time.Millisecond)
+	defer t.Stop()
 	for {
 		select {
 		case <-t.C: //タイマーイベント
 			moveCh <- mover
 			break
 		case <-closeCh:
-			t.Stop()
 			return
 		}
 	}
