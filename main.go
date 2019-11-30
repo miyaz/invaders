@@ -101,10 +101,10 @@ func drawLoop(sch chan state) {
 		mu.Lock()
 		termbox.Clear(termbox.ColorDefault, termbox.ColorDefault)
 		if st.End == false {
-			for k, _ := range st.Invaders {
+			for k := range st.Invaders {
 				drawInvader(*st.Invaders[k])
 			}
-			for k, _ := range st.Bullets {
+			for k := range st.Bullets {
 				drawBullet(*st.Bullets[k])
 			}
 		} else {
@@ -380,7 +380,7 @@ func checkCollision(st state, i int) state {
 		st.Invaders[i].Vec.Y = -1
 	}
 	//インベーダー同士
-	for o, _ := range st.Invaders {
+	for o := range st.Invaders {
 		//左
 		if st.Invaders[i].Vec.X < 0 && st.Invaders[i].Pos.X == st.Invaders[o].Pos.X+st.Invaders[o].Cols {
 			if st.Invaders[i].Pos.Y <= st.Invaders[o].Pos.Y+st.Invaders[o].Rows &&
@@ -496,7 +496,7 @@ func resetGame(st state) state {
 	if st.HighScore < st.Score {
 		hs = st.Score
 	}
-	for k, _ := range st.Bullets {
+	for k := range st.Bullets {
 		close(st.Bullets[k].CloseCh)
 	}
 	st = initGame()
