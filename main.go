@@ -228,7 +228,7 @@ func controller(st state, stateCh chan state, keyCh chan termbox.Key, moveCh cha
 				break
 			case termbox.KeySpace: //発射
 				bulletCnt++
-				st.Bullets[bulletCnt] = fire(st.Player.Pos.X + st.Player.Cols/2)
+				st.Bullets[bulletCnt] = st.Player.fire()
 				go func(closeCh chan bool, key, ticker int) {
 					moveLoop(bulletCh, closeCh, key, ticker)
 				}(st.Bullets[bulletCnt].CloseCh, bulletCnt, st.Bullets[bulletCnt].Interval)
@@ -339,7 +339,8 @@ func initInvaders() map[int]*invader {
 	return invaders
 }
 
-func fire(x int) *bullet {
+func (p player) fire() *bullet {
+	x := p.Pos.X + p.Cols/2
 	return &bullet{
 		Form:     "▘",
 		Rows:     1,
