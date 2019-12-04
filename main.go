@@ -11,6 +11,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/mattn/go-runewidth"
 	"github.com/nsf/termbox-go"
 )
 
@@ -508,6 +509,8 @@ func resetGame(st state) state {
 
 //main
 func main() {
+	runewidth.DefaultCondition.EastAsianWidth = false
+
 	err := termbox.Init()
 	if err != nil {
 		panic(err)
