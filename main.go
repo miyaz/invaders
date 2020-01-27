@@ -13,11 +13,23 @@ import (
 
 	"github.com/mattn/go-runewidth"
 	"github.com/nsf/termbox-go"
+
+	// for reading embed files
+	_ "github.com/miyaz/invaders/statik"
+	"github.com/rakyll/statik/fs"
+
+	"github.com/faiface/beep"
+	"github.com/faiface/beep/mp3"
+	"github.com/faiface/beep/speaker"
 )
 
 const (
-	_height = 40
-	_width  = 120
+	_height   = 40
+	_width    = 120
+	gunSound  = "/gunshot.mp3"
+	iteSound  = "/ite.mp3"
+	uwahSound = "/uwah.mp3"
+	achoSound = "/acho.mp3"
 )
 
 type point struct {
@@ -26,6 +38,10 @@ type point struct {
 }
 
 var mu sync.Mutex
+var (
+	streamer beep.Streamer
+	format   beep.Format
+)
 
 //ステータス
 type state struct {
@@ -67,6 +83,35 @@ type bullet struct {
 	Vec      point
 	Interval int
 	CloseCh  chan bool
+}
+
+func initSound(mp3file string) *beep.Buffer {
+	statikFS, err := fs.New()
+	if err != nil {
+		fmt.Printf("fs.New error: %w", err)
+	}
+
+	file, err := statikFS.Open(mp3file)
+	if err != nil {
+		fmt.Printf("statikFS.Open error: %w", err)
+	}
+	defer file.Close()
+
+	streamer, format, err := mp3.Decode(file)
+	if err != nil {
+		fmt.Printf("mp3.Decode error: %w", err)
+	}
+
+	buffer := beep.NewBuffer(format)
+	buffer.Append(streamer)
+	defer streamer.Close()
+
+	return buffer
+}
+
+func playSound(buffer *beep.Buffer) {
+	shot := (*buffer).Streamer(0, (*buffer).Len())
+	speaker.Play(shot)
 }
 
 //タイマーイベント
@@ -200,8 +245,16 @@ func choice(len int) int {
 
 //ゲームメイン処理
 func controller(st state, stateCh chan state, keyCh chan termbox.Key, moveCh chan int) {
+	sr := beep.SampleRate(44100)
+	speaker.Init(sr, sr.N(time.Second/60))
+
+	gunBuf := initSound(gunSound)
+	iteBuf := initSound(iteSound)
+	uwahBuf := initSound(uwahSound)
+	achoBuf := initSound(achoSound)
 	bulletCh := make(chan int)
 	bulletCnt := 0
+	hitCnt := 0
 	for {
 		select {
 		case key := <-keyCh: //キーイベント
@@ -229,6 +282,7 @@ func controller(st state, stateCh chan state, keyCh chan termbox.Key, moveCh cha
 				break
 			case termbox.KeySpace: //発射
 				bulletCnt++
+				playSound(gunBuf)
 				st.Bullets[bulletCnt] = st.Player.fire()
 				go func(closeCh chan bool, key, ticker int) {
 					moveLoop(bulletCh, closeCh, key, ticker)
@@ -244,7 +298,10 @@ func controller(st state, stateCh chan state, keyCh chan termbox.Key, moveCh cha
 				if _, ok := st.Invaders[i]; ok {
 					st.Invaders[i].Pos.X += st.Invaders[i].Vec.X
 					st.Invaders[i].Pos.Y += st.Invaders[i].Vec.Y
-					st = checkCollision(st, i)
+					st, hitCnt = checkCollision(st, i)
+					if hitCnt == 1 {
+						playSound(achoBuf)
+					}
 				}
 			}
 			mu.Unlock()
@@ -255,7 +312,13 @@ func controller(st state, stateCh chan state, keyCh chan termbox.Key, moveCh cha
 			if st.End == false {
 				if _, ok := st.Bullets[i]; ok {
 					st.Bullets[i].Pos.Y += st.Bullets[i].Vec.Y
-					st = checkHit(st, i)
+					st, hitCnt = checkHit(st, i)
+					switch hitCnt {
+					case 1, 2:
+						playSound(iteBuf)
+					case 3:
+						playSound(uwahBuf)
+					}
 				}
 			}
 			mu.Unlock()
@@ -355,7 +418,8 @@ func (p player) fire() *bullet {
 }
 
 //衝突判定
-func checkCollision(st state, i int) state {
+func checkCollision(st state, i int) (state, int) {
+	hitCnt := 0
 	//Playerが右の壁に到達
 	if st.Player.Pos.X+st.Player.Cols > _width {
 		st.Player.Pos.X -= 3
@@ -444,15 +508,17 @@ func checkCollision(st state, i int) state {
 			st.Invaders[i].Vec.X = +1
 		}
 		st.Life--
+		hitCnt++
 		if st.Life <= 0 {
 			st = resetGame(st)
 		}
 	}
 
-	return st
+	return st, hitCnt
 }
 
-func checkHit(st state, i int) state {
+func checkHit(st state, i int) (state, int) {
+	hitCnt := 0
 	bullet := st.Bullets[i]
 	//命中判定
 	for o, invader := range st.Invaders {
@@ -462,6 +528,7 @@ func checkHit(st state, i int) state {
 			delete(st.Bullets, i)
 			st.Invaders[o].Life--
 			st.Combo++
+			hitCnt = 3 - st.Invaders[o].Life
 			switch st.Invaders[o].Life {
 			case 2:
 				st.Invaders[o].Color = termbox.ColorMagenta
@@ -478,7 +545,7 @@ func checkHit(st state, i int) state {
 			if len(st.Invaders) == 0 {
 				st = resetGame(st)
 			}
-			return st
+			return st, hitCnt
 		}
 	}
 
@@ -489,7 +556,7 @@ func checkHit(st state, i int) state {
 		delete(st.Bullets, i)
 	}
 
-	return st
+	return st, hitCnt
 }
 
 func resetGame(st state) state {
