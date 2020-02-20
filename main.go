@@ -193,7 +193,6 @@ func drawBullet(bullet bullet) {
 }
 
 func choice(len int) int {
-	rand.Seed(time.Now().UnixNano())
 	i := rand.Intn(len)
 	return i
 }
@@ -505,6 +504,11 @@ func resetGame(st state) state {
 	st.HighScore = hs
 	st.Score = s
 	return st
+}
+
+//init
+func init() {
+	rand.Seed(time.Now().UnixNano())
 }
 
 //main
